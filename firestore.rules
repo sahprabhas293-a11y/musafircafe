@@ -1,0 +1,104 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function getAdminData() {
+      return get(/databases/$(database)/documents/adminUsers/$(request.auth.uid)).data;
+    }
+
+    function isSuperAdmin() {
+      return isAuthenticated() && getAdminData().role == 'SUPER_ADMIN' && getAdminData().isActive == true;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && (getAdminData().role == 'SUPER_ADMIN' || getAdminData().role == 'ADMIN') && getAdminData().isActive == true;
+    }
+
+    function isEditor() {
+      return isAuthenticated() && (getAdminData().role == 'SUPER_ADMIN' || getAdminData().role == 'ADMIN' || getAdminData().role == 'EDITOR') && getAdminData().isActive == true;
+    }
+
+    // Public website content - Read allowed for all, Write requires Editor or higher
+    match /settings/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /siteContent/{docId} {
+      allow read: if true;
+      allow write: if isEditor();
+    }
+
+    match /menuCategories/{catId} {
+      allow read: if true;
+      allow write: if isEditor();
+    }
+
+    match /menuItems/{itemId} {
+      allow read: if true;
+      allow write: if isEditor();
+    }
+
+    match /signatures/{sigId} {
+      allow read: if true;
+      allow write: if isEditor();
+    }
+
+    match /gallery/{photoId} {
+      allow read: if resource.data.published == true || isEditor();
+      allow write: if isEditor();
+    }
+
+    match /destinations/{destId} {
+      allow read: if true;
+      allow write: if isEditor();
+    }
+
+    match /socialLinks/{linkId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Customer Reservations:
+    // - Public can create a reservation with strict validation
+    // - Public CANNOT read, update, or delete any reservations
+    // - Only Admin or Super Admin can read and update status
+    match /reservations/{reservationId} {
+      allow create: if request.resource.data.name is string
+                    && request.resource.data.name.size() >= 2
+                    && request.resource.data.name.size() <= 80
+                    && request.resource.data.phone is string
+                    && request.resource.data.phone.size() >= 7
+                    && request.resource.data.email is string
+                    && request.resource.data.email.size() >= 5
+                    && request.resource.data.date is string
+                    && request.resource.data.time is string
+                    && request.resource.data.guests is int
+                    && request.resource.data.guests >= 1
+                    && request.resource.data.guests <= 20
+                    && request.resource.data.status == 'PENDING';
+      
+      allow read: if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isSuperAdmin();
+    }
+
+    // Audit logs: Read only by Admins, Write created by server/admins, Deletions never allowed
+    match /auditLogs/{logId} {
+      allow read: if isAdmin();
+      allow create: if isEditor();
+      allow update, delete: if false;
+    }
+
+    // Admin Users directory: Read/Write strictly restricted to Super Admin
+    match /adminUsers/{userId} {
+      allow read: if isAuthenticated() && (request.auth.uid == userId || isSuperAdmin());
+      allow write: if isSuperAdmin();
+    }
+  }
+}
